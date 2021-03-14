@@ -1,0 +1,145 @@
+---
+title: "Project 2 – Dataset 2: Congressional Seats by State"
+author: "Matthew Lucich"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, results = TRUE, fig.show = "show", warning=FALSE, message = FALSE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(ggplot2)
+library(DT)
+```
+
+## Overview
+
+The approach below starts off with loading CSV data from the Brookings Institution, titled *1-1 Apportionment of Congressional Seats, by Region and State, 1910 - 2010*. The dataset includes unnecessary headers, therefore the skip parameter is passed in while loading the dataframe. There are also several extraneous rows: either blank or containing notes. Those are cleared by simply filtering out rows where the state column is blank. Next, regions are removed via a vector, using "!" and "%in%" operators, as there is no scalable conditionals to target all regions. Using the pivot_longer function the data is transformed from having columns for each year to having one year column and the respective values in the cong_seats column. During data exploration the lag, lead functions are you used to calculate percentage decade over decade. Additionally, summarise is used to generate multiple calculated columns.
+
+
+### Loading the data
+
+```{r}
+
+# Load congressional seats csv from Github URL
+#df_cs_raw <- read.csv(url("https://raw.githubusercontent.com/mattlucich/data-transformation/seats/congressional-seats.csv"))
+
+# Load congressional seats csv from Github repo (if you prefer)
+df_cs_raw <- read.csv("congressional-seats.csv", skip = 3)
+
+# Preview the data
+glimpse(df_cs_raw)
+
+```
+
+
+### Cleaning the data
+
+```{r}
+
+# Rename column
+df_cs_raw <- df_cs_raw %>% rename(state = "Region.and.State")
+
+# Filter out empty rows
+df_cs_raw <- df_cs_raw %>% filter(state != "")
+
+# Remove regions
+remove_regions <- c("South", "Border", "New England", "Mid-Atlantic", "Midwest",
+                    "Plains", "Rocky Mountains", "Pacific Coast")
+df_cs_raw <- df_cs_raw %>% filter(!state %in% remove_regions)
+
+# Remove columns with only NAs (1920s)
+all_na_column <- function(x) any(!is.na(x))
+df_cs_raw <- df_cs_raw %>% select(where(all_na_column))
+
+# Convert all columns except "state" to numeric
+df_cs_raw <- df_cs_raw %>% mutate(across(!state, as.numeric))
+
+```
+
+
+## Transforming the data
+
+```{r}
+
+# Gather year columns into one column "year" and their values to "cong_seats"
+df_cs_long <- df_cs_raw %>% 
+                        pivot_longer(
+                          cols = X1910:X2010, 
+                          names_to = "year", 
+                          values_to = "cong_seats",
+                          values_drop_na = TRUE
+                        )
+
+# Remove the extraneous "X" in the year values
+df_cs_long <- df_cs_long %>% mutate(year = sub("X", "", year))
+
+# Preview the long format
+datatable(df_cs_long, caption = "Congressional Seats by Year (long format)")
+
+```
+
+
+
+### Congressional Seats by Year
+
+```{r}
+# Group by year and sum congressional seats
+df_cs_year <- df_cs_long %>% group_by(year) %>% 
+                summarise(total_cs = sum(as.numeric(cong_seats)))
+
+# Add change column to see which years had biggest increase
+df_cs_year <- df_cs_year %>% 
+                mutate(perc_change = round((lead(total_cs) - lag(total_cs)) / lag(total_cs), 4))
+
+# Wow, that was anticlimactic
+datatable(df_cs_year, caption = "Congressional Seats by Decade")
+
+```
+
+
+
+### Congressional Seats by State
+
+```{r}
+
+# Group by state and create latest, median, max, mix, and total columns
+df_cs_state <- df_cs_long %>% group_by(state) %>% 
+                    summarise(latest_cs = last(cong_seats),
+                              median_cs = median(cong_seats),
+                              max_cs = max(cong_seats),
+                              min_cs = min(cong_seats),
+                              total_cs = sum(cong_seats))
+
+datatable(df_cs_state, caption = "Congressional Seats by State")
+
+# Histogram: Congressional seats by state
+ggplot(df_cs_state, aes(x=reorder(state, -latest_cs), weights=latest_cs)) + 
+  geom_bar(fill="green4") + theme(axis.text.x = element_text(angle = 90)) +
+  geom_text(aes(label=latest_cs, y=latest_cs), vjust=1.5, color="white", size=2.2) +
+  ggtitle("Congressional Seats by State") + 
+  ylab("Most Recent # of Congressional Seats") + xlab("State")
+
+```
+
+
+## Conclusion
+
+This dataset was chosen mainly for its unique structure that fits perfectly with the projects objectives of loading, tidying, and transforming datasets. Unfortunately, the lack of attributes made the analysis anticlimactic. The Brookings Institution also offers data with the percent breakout between political parties over time, which may make for a more interesting follow-up analysis. In the meantime, the tables and histogram above give us an informative view of how each state compares in terms of congressional representation as well as how that has changed over the decades.
+
+
+## References
+
+*Vital Statistics*, The Brookings Institution ["1-1 Apportionment of Congressional Seats, by Region and State, 1910 - 2010 (435 seats)"](https://www.brookings.edu/multi-chapter-report/vital-statistics-on-congress/)
+
+
+* * *
+
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>.
+
