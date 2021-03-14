@@ -1,0 +1,181 @@
+---
+title: "Project 2 – Dataset 3: Canada Labour Force Characteristics"
+author: "Matthew Lucich"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, results = TRUE, fig.show = "show", warning=FALSE, message = FALSE)
+```
+
+```{r load-packages}
+library(tidyverse)
+library(ggplot2)
+library(DT)
+```
+
+## Overview
+
+The raw Canada Labour Force Characteristics dataset used in this project is far from being able to be used for data analysis purposes. To change this several data cleaning and transformation tactics are employed. Extraneous rows are removed in lines 36, 65, 73, and 74. Columns are renamed and transformed multiple times through out the clean up process, sometimes through the use of regex. For the table views, the data is made wider via pivot_wider. In the data visualization portion subsets of the data are made longer via pivot_longer. Additionally, during the transformation process new columns are created via mutate.
+
+
+### Loading the data
+
+```{r}
+
+# Load Canada unemployment csv from Github URL
+#df_cs_raw <- read.csv(url("https://raw.githubusercontent.com/mattlucich/data-transformation/une/canada-unemployment.csv"))
+
+# Load Canada unemployment csv from Github repo (if you prefer)
+df_cu_raw <- read.csv("canada-unemployment.csv", skip = 9)
+
+# Confirm we've skipped the correct amount of rows by viewing the column names
+colnames(df_cu_raw)
+
+# Preview the data
+datatable(df_cu_raw, caption = "Raw Canada Labour Force Characteristics data")
+
+```
+
+
+### Cleaning and transforming the data
+
+```{r}
+
+# Remove unneeded columns
+df_cu_raw <- df_cu_raw %>% select (-c(January.2021,
+                         February.2020.to.February.2021,
+                         January.2021.to.February.2021,
+                         January.2021.to.February.2021.1,
+                         February.2020.to.February.2021.1))
+
+# Rename columns
+df_cu_raw <- df_cu_raw %>% rename(province = "Geography.4",
+                                  labour_stat = "Labour.force.characteristics",
+                                  feb_2020 = "February.2020",
+                                  feb_2021 = "February.2021")
+
+# Filter out extraneous rows
+df_cu_raw <- df_cu_raw %>% filter(feb_2020 != "")
+
+# If province is empty fill in value from previous row
+for (i in 1:10) {
+  df_cu_raw <- df_cu_raw %>% mutate(province = ifelse(province=="", lag(province), province))
+}
+
+# Remove sub headers and Canada rows
+df_cu_raw <- df_cu_raw %>% filter(!feb_2020 %in% c("Persons", "Percentage"))
+df_cu_raw <- df_cu_raw %>% filter(!province %in% c("Canada"))
+
+# Remove unneeded stats
+remove_stats <- c("Labour force (x 1,000) 7", "Employment (x 1,000) 8", 
+                    "Full-time employment (x 1,000) 9", "Part-time employment  (x 1,000) 10",
+                    "Unemployment (x 1,000) 11")
+df_cu_raw <- df_cu_raw %>% filter(!labour_stat %in% remove_stats)
+
+# Make the dataframe wider (turn values from labour_stat into columns)
+df_cu_raw <- df_cu_raw %>% pivot_wider(names_from = labour_stat, 
+                                        values_from = c(feb_2020, feb_2021))
+
+# Rename population columns
+df_cu_raw <- df_cu_raw %>% rename(feb_2020_population = "feb_2020_Population (x 1,000) 5 6",
+                                  feb_2021_population = "feb_2021_Population (x 1,000) 5 6")
+
+# Remove extraneous two digit numbers at end of column names via Regex 
+colnames(df_cu_raw) <- sub("(\\d{2}$)", "", colnames(df_cu_raw))
+
+# Trim whitespace from column names
+colnames(df_cu_raw) <- trimws(colnames(df_cu_raw))
+
+# Convert column names to lowercase and replace blank spaces with underscores
+df_cu_raw <- df_cu_raw %>% 
+                rename_with(~ tolower(gsub(" ", "_", .x, fixed = TRUE)))
+
+# Remove unnecessary commas
+df_cu_raw <- as.data.frame(lapply(df_cu_raw, function(y) gsub(",", "", y)))
+
+# Convert all columns except "province" to numeric
+df_cu_raw <- df_cu_raw %>% mutate(across(!province, as.numeric))
+
+# Check the data types of each column
+str(df_cu_raw)
+
+# Create YoY percentage point change columns
+df_cu_raw <- df_cu_raw %>% 
+        mutate(yoy_unemploy_rate_pp_change = round((feb_2021_unemployment_rate -   
+                                                      feb_2020_unemployment_rate), 2),
+              yoy_part_rate_pp_change = round((feb_2021_participation_rate - 
+                                                 feb_2020_participation_rate), 2),
+              yoy_employ_rate_pp_change = round((feb_2021_employment_rate - 
+                                                   feb_2020_employment_rate), 2))
+
+# Reorder columns for easier comparisons
+df_cu <- df_cu_raw[, c(1, 2, 6, 3, 7, 10, 4, 8, 11, 5, 9, 12)]
+
+```
+
+
+### Analysis: Canada Labour Force Characteristics
+
+```{r}
+
+# Review the data
+datatable(df_cu, caption = "Canada Labour Force Characteristics")
+
+# Select only unemployment rate columns and province
+df_cu_unemploy <- df_cu %>% select(province, feb_2020_unemployment_rate, feb_2021_unemployment_rate)
+
+# Rename columns to improve chart formatting
+df_cu_unemploy <- df_cu_unemploy %>% rename("2020" = feb_2020_unemployment_rate,
+                                            "2021" = feb_2021_unemployment_rate)
+
+# Convert to long format 
+df_cu_unemploy <- df_cu_unemploy %>% pivot_longer(c("2020", "2021"), 
+                                     names_to = "year", values_to = "unemployment_rate")
+
+# YoY unemployment rate by province
+ggplot(df_cu_unemploy, aes(province, unemployment_rate)) +   
+  geom_bar(aes(fill = year), position = "dodge", stat="identity") + 
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("YoY Unemployment by Province") + 
+  ylab("Unemployment Rate") + xlab("Province")
+
+# Select only participation rate columns and province
+df_cu_part <- df_cu %>% select(province, feb_2020_participation_rate, feb_2021_participation_rate)
+
+# Rename columns to improve chart formatting
+df_cu_part <- df_cu_part %>% rename("2020" = feb_2020_participation_rate,
+                                    "2021" = feb_2021_participation_rate)
+
+# Convert to long format
+df_cu_part <- df_cu_part %>% pivot_longer(c("2020", "2021"), 
+                                     names_to = "year", values_to = "participation_rate")
+
+# YoY Participation rate by province
+ggplot(df_cu_part, aes(province, participation_rate)) +   
+  geom_bar(aes(fill = year), position = "dodge", stat="identity") + 
+  theme(axis.text.x = element_text(angle = 90)) +
+  ggtitle("YoY Participation by Province") + 
+  ylab("Participation Rate") + xlab("Province")
+
+```
+
+
+## Conclusion
+
+Due to the relatively labor-intensive data cleaning and transformation process, the data analysis portion of this dataset was cursory. Though attention to detail was put into considering what columns to include in the final table view and how to order them. The data visualizations provide a clear year over year picture of how crucial labour force characteristics have changed by province. Recommendations for further analysis include focusing on provinces with both the largest and smallest unemployment rate changes year over year then research factors for possible causes. A similar analysis should be conducted for participation rate as well.
+
+
+## References
+
+Statistics Canada (StatCan) ["Labour force characteristics by province, monthly, seasonally adjusted"](https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1410028703)
+
+
+* * *
+
+<a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-sa/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International License</a>.
+
